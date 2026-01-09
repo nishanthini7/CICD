@@ -1,0 +1,62 @@
+name: SonarQube-React-CI-CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  ci-cd:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2️⃣ Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      # 3️⃣ SonarQube Scan (FULL REPO)
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      # 4️⃣ Quality Gate (BLOCKS PIPELINE)
+      - name: SonarQube Quality Gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      # 5️⃣ Install Frontend dependencies (ONLY if gate PASSES)
+      - name: Install Frontend dependencies
+        working-directory: Frontend
+        run: npm ci
+
+      # 6️⃣ Build React app → dist/
+      - name: Build React app
+        working-directory: Frontend
+        run: npm run build
+
+      # 7️⃣ Setup SSH for EC2 deployment
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      # 8️⃣ Deploy ONLY dist/ to EC2
+      - name: Deploy dist to EC2
+        run: |
+          rsync -avz --delete Frontend/dist/ \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/var/www/html/
